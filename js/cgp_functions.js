@@ -1,5 +1,5 @@
 
-var NUM_FUNCS = 15;
+var NUM_FUNCS = 18;
 var cgpFunc = function(idx, varArgs, constArgs) {
 	switch (idx) {
 		case 0: return constArgs[0]; //return the constant

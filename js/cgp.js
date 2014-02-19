@@ -15,15 +15,15 @@ var numGens = 10000;
 var drawEvery = 50;
 var numTrainingPoints = 50;
 
-var seedBeing = new CGPBeing(4, 8, 5, 3);
+var seedBeing = new CGPBeing(4, 5, 4, 3);
 
 var border = 8;
 var numcellsy = 2;
 var numcellsx = 3;
 
-var canvasScale = 4;
-var canvasWidth = 200;
-var canvasHeight = 120;
+var canvasScale = 3;
+var canvasWidth = 271;
+var canvasHeight = 178;
 
 /*************
  * constants */
@@ -375,7 +375,7 @@ function CGPBeing(numInputs, cols, rows, numOutputs, dna) {
 	//0: function id, 1: connection id, 2: constant argument
 	this.GENE_PATN = [0, 1, 1, 2]; //gene pattern
 	this.GENE_LEN = this.GENE_PATN.length;
-	this.MUT_RATE = 0.02;
+	this.MUT_RATE = 0.05;
 
 	//////////
 	//fields//
@@ -408,47 +408,46 @@ function CGPBeing(numInputs, cols, rows, numOutputs, dna) {
 	};
 
 	this.evaluate = function(inputs) {
-		var active = []; //nodes that affect the output
+		//////////////////////////////////////
+		//figure out which nodes to evaluate//
+		var active = [];
 		var numBPs = this.dna.length;
 		for (var ai = numBPs-this.numOutputs; ai < numBPs; ai++) { //all the outputs
 			//are active and so are all the nodes they reference (recurse)
 			this.markReferenced(this.dna[ai], active);
 		}
+		active.sort(function(a,b) { return a-b; });
 
-		var values = []; //input based id
-		//inputs are easy so load all of them
-		for (var ai = 0; ai < this.numInputs; ai++) values.push(inputs[ai]);
-		//compute the node values, left to right
-		for (var ai = 0; ai < this.cols; ai++) { //for each column
-			for (var bi = 0; bi < this.rows; bi++) { //each row in that column
-				//the gene id, not necessarily the location in the array
-				var id = ai*this.rows + bi + this.numInputs; //input based id
-				if (active[id] !== undefined) { //if this id is active
-					//then compute its output, otherwise don't bother
-					var idx = this.GENE_LEN*(id-this.numInputs); //node id->dna idx
-					var gene = this.dna.slice(idx, idx+this.GENE_LEN);
-					var funcId = -1;
-					var inputs = [];
-					var constArgs = [];
-					for (var gi = 0; gi < this.GENE_LEN; gi++) {
-						switch (this.GENE_PATN[gi]) {
-							case 0: funcId = gene[gi]; break; //func id
-							case 1: //connection
-								inputs.push(values[gene[gi]]);
-								break;
-							case 2: constArgs.push(gene[gi]); break; //const arg
-						}
-					}
-					values[id] = cgpFunc(funcId, inputs, constArgs);
+		///////////////////////////////////////////
+		//evaluate the nodes you need to evaluate//
+		var values = inputs.slice(0); //inputs are easy so load all of them
+		var prev = -1; //so you don't double dip
+		for (var ai = 0; ai < active.length; ai++) {
+			if (active[ai] === prev) continue; //duplicates
+			var idx = this.GENE_LEN*(active[ai]-this.numInputs); //input id->dna idx
+			var funcId = -1;
+			var inputs = [];
+			var constArgs = [];
+			for (var gi = 0; gi < this.GENE_LEN; gi++) {
+				switch (this.GENE_PATN[gi]) {
+					case 0: funcId = this.dna[idx+gi]; break; //func id
+					case 1: //connection
+						inputs.push(values[this.dna[idx+gi]]);
+						break;
+					case 2: //const arg
+						constArgs.push(this.dna[idx+gi]); 
+						break;
 				}
 			}
+			values[active[ai]] = cgpFunc(funcId, inputs, constArgs);
+			prev = active[ai];
 		}
 
+		/////////////////////////////
+		//gather up all the outputs//
 		var ret = []; //the outputs
 		var numBPs = this.dna.length;
-		//gather up all the outputs
 		for (var ai = numBPs-this.numOutputs; ai < numBPs; ai++) {
-			//ret.push(closestTo([0, 1], values[this.dna[ai]])
 			ret.push(values[this.dna[ai]]); 
 		}
 		return ret;
@@ -501,9 +500,8 @@ function CGPBeing(numInputs, cols, rows, numOutputs, dna) {
 	this.markReferenced = function(geneId, arr) {
 		if (geneId < this.numInputs) return; //don't mark anything for inputs
 		
-		arr[geneId] = true; //mark it for evaluation
-		var nodeId = geneId - this.numInputs; //0 idx'd nodes
-		var idx = this.GENE_LEN*nodeId; //idx in the dna
+		arr.push(geneId); //mark it for evaluation
+		var idx = this.GENE_LEN*(geneId - this.numInputs); //idx in the dna
 		for (var gi = 0; gi < this.GENE_LEN; gi++) {
 			switch (this.GENE_PATN[gi]) {
 				case 1: //connection
