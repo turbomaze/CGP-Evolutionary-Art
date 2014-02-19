@@ -15,7 +15,7 @@ var numGens = 10000;
 var drawEvery = 50;
 var numTrainingPoints = 50;
 
-var seedBeing = new CGPBeing(2, 8, 5, 3);
+var seedBeing = new CGPBeing(4, 8, 5, 3);
 
 var border = 8;
 var numcellsy = 2;
@@ -180,9 +180,11 @@ function paintCGPBeing(gen, ys, ye, xs, xe) {
 	var currImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 	for (var yi = ys; yi < ye; yi++) {
 		for (var xi = xs; xi < xe; xi++) {
-			var res = gen.evaluate(
-				[xi-xs, yi-ys]
-			);
+			var x = tightMap(xi-xs, 0, xe-xs, -0.5, 0.5);
+			var y = tightMap(yi-ys, 0, ye-ys, -0.5, 0.5);
+			var r = Math.sqrt(x*x + y*y);
+			var theta = Math.atan2(y, x);
+			var res = gen.evaluate([x, y, r, theta]);
 
 			var idx = 4*(yi*canvas.width + xi);
 			var raw = []; //the raw, normalized values of the outputs
