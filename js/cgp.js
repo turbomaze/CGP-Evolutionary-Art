@@ -10,7 +10,7 @@
 
 /**********
  * config */
-var humanFitness = false;
+var humanFitness = true;
 var numGens = 10000;
 var drawEvery = 50;
 var numTrainingPoints = 50;
@@ -34,6 +34,7 @@ var canvas;
 var ctx;
 var trainingData;
 var handler;
+var pop;
 
 /******************
  * work functions */
@@ -49,7 +50,7 @@ function initCGPEvoArt() {
 	if (humanFitness) {
 		///////////////////////////////////////////////////////////////////////////
 		//grid of randomly generated images (2 input CGPs -> 3 RGB outputs % 256)//
-		var pop = [seedBeing];
+		pop = [seedBeing];
 		for (var ai = 1; ai < numcellsy*numcellsx; ai++) pop.push(pop[0].mutate());
 		updateCanvas(pop);
 		canvas.addEventListener('mousedown', function(e) {
@@ -146,17 +147,44 @@ function updateCanvas(generators) {
 	);
 }
 
-function paintCGPBeing(generator, ys, ye, xs, xe) {
+function paintCGPBeing(gen, ys, ye, xs, xe) {
+	function getRGBFromRaw(arr) {
+		return arr.map(function(n){return Math.floor(tightMap(n,0,1,0,255));});
+	}
+
+	//determine the range of the outputting functions
+	var funcRanges = []; //the number of outputs must be 3 so this will be 3 long
+	//get the function ids of the final elements
+	for (var ai = gen.dna.length-3; ai < gen.dna.length; ai++) {
+		var inputBasedId = gen.dna[ai];
+		var nodeId = inputBasedId - gen.numInputs;
+		var idx = gen.GENE_LEN*nodeId;
+		var gene = gen.dna.slice(idx, idx+gen.GENE_LEN);
+		for (var gi = 0; gi < gen.GENE_LEN; gen++) {
+			if (gen.GENE_PATN[gi] === 0) { //function gene
+				funcRanges.push(cgpFuncRange(gene[gi]));
+				break;
+			}
+		}
+	}
+
+	//draw all the pixels to the screen
 	var currImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 	for (var yi = ys; yi < ye; yi++) {
 		for (var xi = xs; xi < xe; xi++) {
-			var res = generator.evaluate(
+			var res = gen.evaluate(
 				[xi-xs, yi-ys]
 			);
+
 			var idx = 4*(yi*canvas.width + xi);
-			currImageData.data[idx+0] = res[0]%256;
-			currImageData.data[idx+1] = res[1]%256;
-			currImageData.data[idx+2] = res[2]%256;
+			var raw = []; //the raw, normalized values of the outputs
+			raw[0] = tightMap(res[0], funcRanges[0][0], funcRanges[0][1], 0, 1);
+			raw[1] = tightMap(res[1], funcRanges[1][0], funcRanges[1][1], 0, 1);
+			raw[2] = tightMap(res[2], funcRanges[2][0], funcRanges[2][1], 0, 1);
+			var color = getRGBFromRaw(raw); //raw converted to an RGB value
+			currImageData.data[idx+0] = color[0];
+			currImageData.data[idx+1] = color[1];
+			currImageData.data[idx+2] = color[2];
 			currImageData.data[idx+3] = 255;
 		}
 	}
@@ -188,6 +216,20 @@ function getPixelsFromImage(location, callback) { //returns array of pixel color
 	img.src = location; //load the image
 }
 
+function getMousePos(e) {
+	var rect = canvas.getBoundingClientRect();
+	return [(e.clientX-rect.left)/canvasScale, (e.clientY-rect.top)/canvasScale];
+}
+
+function $(sel) {
+	if (sel.charAt(0) === '#') return document.getElementById(sel.substring(1));
+	else return false;
+}
+
+function currentTimeMillis() {
+	return new Date().getTime();
+}
+
 //stolen from http://stackoverflow.com/questions/4288759/asynchronous-for-cycle-in-javascript
 function asyncLoop(iterations, func, callback) {
 	var index = 0;
@@ -215,22 +257,22 @@ function asyncLoop(iterations, func, callback) {
 	return loop;
 }
 
-function getMousePos(e) {
-	var rect = canvas.getBoundingClientRect();
-	return [(e.clientX-rect.left)/canvasScale, (e.clientY-rect.top)/canvasScale];
-}
-
-function $(sel) {
-	if (sel.charAt(0) === '#') return document.getElementById(sel.substring(1));
-	else return false;
-}
-
-function currentTimeMillis() {
-	return new Date().getTime();
-}
-
 function getRandNum(lower, upper) { //returns number in [lower, upper)
 	return Math.floor((Math.random()*(upper-lower))+lower);
+}
+
+function tightMap(n, d1, d2, r1, r2) { //enforces boundaries
+	var raw = map(n, d1, d2, r1, r2);
+	if (raw < r1) return r1;
+	else if (raw > r2) return r2;
+	else return raw;
+}
+
+//given an n in [d1, d2], return a linearly related number in [r1, r2]
+function map(n, d1, d2, r1, r2) {
+	var Rd = d2-d1;
+	var Rr = r2-r1;
+	return (Rr/Rd)*(n - d1) + r1;
 }
 
 /***********
@@ -244,8 +286,11 @@ function Handler(numIslands, popSize, seedIndividual, logEvery) {
 	}
 	this.logEvery = logEvery || 50;
 	this.timeElapsed = 0;
+	this.finished = false;
 
 	this.step = function() {
+		if (this.finished) return false;
+
 		this.currentGen += 1;
 		var start = currentTimeMillis();
 
@@ -256,7 +301,7 @@ function Handler(numIslands, popSize, seedIndividual, logEvery) {
 			//evolve and get the current best solution and its score
 			currentBests.push(this.islands[ai].evolve()); 
 		}
-		var currentBest = [null, Math.pow(2, 2000), ''];
+		var currentBest = currentBests[0];
 		for (var ai = 0; ai < this.islands.length; ai++) {
 			if (currentBests[ai][1] <= currentBest[1]) {
 				currentBest = currentBests[ai];
@@ -267,7 +312,7 @@ function Handler(numIslands, popSize, seedIndividual, logEvery) {
 		//reporting//
 		var duration = currentTimeMillis() - start;
 		this.timeElapsed += duration;
-		if (this.currentGen%this.logEvery === 0) {
+		if (this.currentGen%this.logEvery === 0 || currentBest[1] === 0) {
 			var avgDuration = this.timeElapsed/this.currentGen;
 			console.log('Generation #' + this.currentGen + '\n' + 
 						'Score: ' + currentBest[1] + '\n' +
@@ -277,6 +322,7 @@ function Handler(numIslands, popSize, seedIndividual, logEvery) {
 						'Solution: ' + currentBest[2] + '\n'
 			);
 		}
+		if (currentBest[1] === 0) this.finished = true;
 
 		return currentBest[0];
 	};
@@ -304,7 +350,7 @@ function Island(popSize, seedIndividual) {
 		var scores = [this.population[0].getFitness()];
 		var selection = this.population[0];
 		for (var ai = 1; ai < this.population.length; ai++) {
-			scores[ai] = this.population[ai].getFitness();
+			scores[ai] = this.population[ai].getFitness(scores[0]);
 			if (scores[ai] <= scores[0]) { //the "or equals" in <= is very important!
 				selection = this.population[ai];
 			}
@@ -313,116 +359,200 @@ function Island(popSize, seedIndividual) {
 	};
 }
 
-function CGPBeing(numInputs, cols, rows, numOutputs, genes) {
+function CGPBeing(numInputs, cols, rows, numOutputs, dna) {
+	////////////////////
+	//object constants//
+	//0: function id, 1: connection id, 2: constant argument
+	this.GENE_PATN = [0, 1, 1, 2]; //gene pattern
+	this.GENE_LEN = this.GENE_PATN.length;
+	this.MUT_RATE = 0.02;
+
+	//////////
+	//fields//
 	this.numInputs = numInputs || 2;
 	this.cols = cols || 4;
 	this.rows = rows || 3;
 	this.numOutputs = numOutputs || 3;
-	this.genes = arguments.length === 5 ? genes : getRandGenes(
+	this.dna = arguments.length === 5 ? dna : getRandGenes(
+		this.GENE_PATN, 
 		this.numInputs, this.cols, this.rows, this.numOutputs
 	);
 
-	this.getFitness = function() {
-		var score = 0.1;
+	//////////////////
+	//work functions//
+	this.getFitness = function(toBeat) {
+		toBeat = toBeat || Math.pow(2, 1023);
+		var score = 0;
 		var colorsSeen = [];
 		for (var ai = 0; ai < trainingData.length; ai++) {
-			var guess = this.evaluate([trainingData[ai][0], trainingData[ai][1]]);
-			score += Math.sqrt(
-				Math.pow(trainingData[ai][2] - guess[0], 2) +
-				Math.pow(trainingData[ai][3] - guess[1], 2) +
-				Math.pow(trainingData[ai][4] - guess[2], 2)
-			);
+			//don't waste time if it's already sub-parent
+			if (score > toBeat) break; //don't bother
+			var guess = this.evaluate(trainingData[ai][0]);
+			score += correspSumSqDiff(guess, trainingData[ai][1]);
+		}
+
+		if (isNaN(score) || Math.abs(score) >= Infinity) {
+			score = Math.pow(2, 1023);
 		}
 		return score;
 	};
 
 	this.evaluate = function(inputs) {
-		var values = [];
-		for (var ai = 0; ai < this.numInputs; ai++) values.push(inputs[ai]);
+		var active = []; //nodes that affect the output
+		var numBPs = this.dna.length;
+		for (var ai = numBPs-this.numOutputs; ai < numBPs; ai++) { //all the outputs
+			//are active and so are all the nodes they reference (recurse)
+			this.markReferenced(this.dna[ai], active);
+		}
 
+		var values = []; //input based id
+		//inputs are easy so load all of them
+		for (var ai = 0; ai < this.numInputs; ai++) values.push(inputs[ai]);
+		//compute the node values, left to right
 		for (var ai = 0; ai < this.cols; ai++) { //for each column
 			for (var bi = 0; bi < this.rows; bi++) { //each row in that column
-				var idx = ai*this.rows + bi;
-				values.push(
-					cgpFunc(
-						this.genes[idx][0], //function id
-						[values[this.genes[idx][1]], values[this.genes[idx][2]]] //inputs
-					)
-				); //evaluate the node at (col, row)
+				//the gene id, not necessarily the location in the array
+				var id = ai*this.rows + bi + this.numInputs; //input based id
+				if (active[id] !== undefined) { //if this id is active
+					//then compute its output, otherwise don't bother
+					var idx = this.GENE_LEN*(id-this.numInputs); //node id->dna idx
+					var gene = this.dna.slice(idx, idx+this.GENE_LEN);
+					var funcId = -1;
+					var inputs = [];
+					var constArgs = [];
+					for (var gi = 0; gi < this.GENE_LEN; gi++) {
+						switch (this.GENE_PATN[gi]) {
+							case 0: funcId = gene[gi]; break; //func id
+							case 1: //connection
+								inputs.push(values[gene[gi]]);
+								break;
+							case 2: constArgs.push(gene[gi]); break; //const arg
+						}
+					}
+					values[id] = cgpFunc(funcId, inputs, constArgs);
+				}
 			}
 		}
 
-		var ret = [];
-		var numGenes = this.genes.length;
-		for (var ai = numGenes-this.numOutputs; ai < numGenes; ai++) {
-			ret.push(values[this.genes[ai]]); //gather up all the outputs
+		var ret = []; //the outputs
+		var numBPs = this.dna.length;
+		//gather up all the outputs
+		for (var ai = numBPs-this.numOutputs; ai < numBPs; ai++) {
+			//ret.push(closestTo([0, 1], values[this.dna[ai]])
+			ret.push(values[this.dna[ai]]); 
 		}
 		return ret;
 	};
 
 	this.mutate = function() {
-		var ret = new CGPBeing(this.numInputs, this.cols, this.rows, this.numOutputs);
-		var mutatedGenes = [];
-		var numGenes = this.genes.length;
-		var mutRate = 0.03;
-		for (var ai = 0; ai < numGenes-this.numOutputs; ai++) {
-			var currentGene = [];
-			for (var bi = 0; bi < 3; bi++) {
-				if (Math.random() < mutRate) {
-					var col = ai/this.numRows;
-					switch (bi) {
-						case 0:
-							currentGene.push(getRandFunctionId());
-							break;
-						default:
-							currentGene.push(
-								getRandInputId(col, this.numInputs, this.numRows)
-							);
-							break;
-					}
-				} else {
-					currentGene.push(this.genes[ai][bi]);
-				}
-			}
-			mutatedGenes.push(currentGene);
-		}
-		for (var ai = numGenes-this.numOutputs; ai < numGenes; ai++) {
-			if (Math.random() < mutRate) {
-				mutatedGenes.push(getRandInputId(this.cols, this.numInputs, this.rows));
-			} else {
-				mutatedGenes.push(this.genes[ai]);
-			}
-		}
+		var mutatedBPs = this.dna.slice(0); //copy the original
+		var numBPs = this.dna.length;
+		var numToMutate = Math.max(this.MUT_RATE*numBPs, 1);
 
-		ret.genes = mutatedGenes;
-		return ret;
+		for (var ai = 0; ai < numToMutate; ai++) {
+			var idxToMutate = getRandNum(0, numBPs);
+			var type = -1;
+			if (idxToMutate >= numBPs-this.numOutputs) { //output gene
+				type = 1; //same as connection genes
+			} else {
+				type = this.GENE_PATN[idxToMutate%this.GENE_LEN];
+			}
+			switch (type) {
+				case 0: //function
+					mutatedBPs[idxToMutate] = getRandFunctionId();
+					break;
+				case 1: //connections
+					//the |0 removes the fractional part
+					var col = (((idxToMutate/this.GENE_LEN)|0)/this.rows)|0;
+					mutatedBPs[idxToMutate] = getRandGeneId(
+						col, this.numInputs, this.rows
+					);
+					break;
+				case 2: //constant arguments
+					var scaleFactor = 0.9+0.2*Math.random(); //0.9 to 1.1
+					if (Math.random() < 0.15) { //15% chance it's negative
+						scaleFactor *= -1; //slim chance it flips sign
+					}
+					mutatedBPs[idxToMutate] = scaleFactor*this.dna[idxToMutate];
+					break;
+				default:
+					mutatedBPs[idxToMutate] = this.dna[idxToMutate];
+					break;
+			}
+		}
+	
+		return new CGPBeing(
+			this.numInputs, this.cols, this.rows, this.numOutputs, mutatedBPs
+		);
 	};
+
+	////////////////////
+	//helper functions//
+	this.markReferenced = function(geneId, arr) {
+		if (geneId < this.numInputs) return; //don't mark anything for inputs
+		
+		arr[geneId] = true; //mark it for evaluation
+		var nodeId = geneId - this.numInputs; //0 idx'd nodes
+		var idx = this.GENE_LEN*nodeId; //idx in the dna
+		for (var gi = 0; gi < this.GENE_LEN; gi++) {
+			switch (this.GENE_PATN[gi]) {
+				case 1: //connection
+					this.markReferenced(this.dna[idx+gi], arr);
+					break;
+			}
+		}
+	}
 
 	this.squish = function() {
 		//btoa([1,2,0.2145566]) = "MSwyLDAuMjE0NTU2Ng=="
 		//atob("MSwyLDAuMjE0NTU2Ng==").split(",").map(parseFloat) = [1,2,0.2145566]
-		return btoa(this.genes);
+		var raw = btoa(this.dna);
+		return raw.substring(0, 32)+':'+raw.substring(raw.length-32);
 	};
 
-	function getRandFunctionId() {
-		return getRandNum(0, 256); 
+	/////////////////////
+	//private functions//
+	function correspSumSqDiff(arr1, arr2) {
+		var sum = 0;
+		for (var ai = 0; ai < Math.min(arr1.length, arr2.length); ai++) {
+			sum += Math.pow(2, (arr1.length-1)-ai)*Math.pow(arr1[ai] - arr2[ai], 2);
+		}
+		return sum;
 	}
 
-	function getRandInputId(col, numInputs, rows) { 
+	function getRandFunctionId() {
+		return getRandNum(0, NUM_FUNCS); 
+	}
+
+	function getRandGeneId(col, numInputs, rows) {
 		return getRandNum(0, col*rows+numInputs);
 	}
 
-	function getRandGenes(numInputs, cols, rows, numOutputs) {
+	function getRandConstArg() {
+		return -1+2*Math.random();
+	}
+
+	function getRandGenes(pattern, numInputs, cols, rows, numOutputs) {
 		var ret = [];
 		for (var ai = 0; ai < cols; ai++) { //for each column
 			for (var bi = 0; bi < rows; bi++) { //each row in that column
-				ret.push([getRandFunctionId(),
-						  getRandInputId(ai, numInputs, rows), 
-						  getRandInputId(ai, numInputs, rows)]); //add genes
+				for (var gi = 0; gi < pattern.length; gi++) {
+					switch (pattern[gi]) {
+						case 0: //func id
+							ret.push(getRandFunctionId()); 
+							break;
+						case 1: //inputs
+							ret.push(getRandGeneId(ai, numInputs, rows));
+							break;
+						case 2: //constant arguments
+							ret.push(getRandConstArg());
+							break;
+					}
+				}
 			}
 		}
 		for (var ai = 0; ai < numOutputs; ai++) { //assign the output nodes
-			ret.push(getRandInputId(cols, numInputs, rows));
+			ret.push(getRandGeneId(cols, numInputs, rows));
 		}
 		return ret;
 	}
