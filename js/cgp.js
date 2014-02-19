@@ -15,7 +15,9 @@ var desiredCanvasWidth = 800;
 
 var numGens = 100000;
 var drawEvery = 50;
-var numTrainingPoints = 50;
+var numTPs = 5; //training points
+var addTPWhenBelow = 1000;
+var maxTP = 200;
 
 var border = 12;
 var numcellsx = 3;
@@ -27,13 +29,14 @@ var canvasHeight = numcellsy*dim[1]+border*(numcellsy-1);
 
 /*************
  * constants */
-var seedBeing = new CGPBeing(4, 8, 6, 3);
+var seedBeing = new CGPBeing(4, 7, 5, 3);
 
 /*********************
  * working variables */
 var canvas;
 var ctx;
 var trainingData;
+var imgData;
 var handler;
 var pop;
 var humanBasedGenNum;
@@ -72,8 +75,9 @@ function initCGPEvoArt() {
 	} else {
 		handler = new Handler(1, 6, seedBeing);
 		getPixelsFromImage('image.png', function(data, width, timeTaken) {
+			imgData = data;
 			//set the canvas width to accomodate the size of the image
-			var numPixels = data.length/4;
+			var numPixels = imgData.length/4;
 			var height = numPixels/width;
 			canvas.width = width;
 			canvas.height = height;
@@ -83,16 +87,7 @@ function initCGPEvoArt() {
 			) + 'px';
 		
 			//load some random points as training data
-			for (var ti = 0; ti < numTrainingPoints; ti++) {
-				var canvasx = getRandNum(0, width);
-				var canvasy = getRandNum(0, height);
-				var x = tightMap(canvasx, 0, width, -0.5, 0.5);
-				var y = tightMap(canvasy, 0, height, -0.5, 0.5);
-				var r = Math.sqrt(x*x + y*y);
-				var theta = Math.atan2(y, x);
-				var idx = 4*(canvasy*width+canvasx); //idx in pixel array
-				trainingData.push([[x, y, r, theta], data.slice(idx, idx+3)]);
-			}
+			addTrainingPoints(numTPs);
 
 			//evolve
 			var ai = 0;
@@ -101,6 +96,9 @@ function initCGPEvoArt() {
 				var currentBest = handler.step();
 				if (handler.currentGen%drawEvery === 0) {
 					paintCGPBeing(currentBest, 0, canvas.height, 0, canvas.width);
+				}
+				if (handler.prevBest[1] < addTPWhenBelow && trainingData.length < maxTP) {
+					addTrainingPoints(1);
 				}
 				ai += 1;
 				setTimeout(function() { callback(true); }, 6);
@@ -190,6 +188,19 @@ function paintCGPBeing(gen, ys, ye, xs, xe) {
 		}
 	}
 	ctx.putImageData(currImageData, 0, 0);
+}
+
+function addTrainingPoints(n) {
+	for (var ti = 0; ti < n; ti++) {
+		var canvasx = getRandNum(0, canvas.width);
+		var canvasy = getRandNum(0, canvas.height);
+		var x = tightMap(canvasx, 0, canvas.width, -0.5, 0.5);
+		var y = tightMap(canvasy, 0, canvas.height, -0.5, 0.5);
+		var r = Math.sqrt(x*x + y*y);
+		var theta = Math.atan2(y, x);
+		var idx = 4*(canvasy*canvas.width+canvasx); //idx in pixel array
+		trainingData.push([[x, y, r, theta], imgData.slice(idx, idx+3)]);
+	}
 }
 
 /********************
@@ -323,6 +334,7 @@ function Handler(numIslands, popSize, seedIndividual, logEvery) {
 	this.logEvery = logEvery || 50;
 	this.timeElapsed = 0;
 	this.finished = false;
+	this.prevBest = [null, null, null];
 
 	this.step = function() {
 		if (this.finished) return false;
@@ -359,6 +371,7 @@ function Handler(numIslands, popSize, seedIndividual, logEvery) {
 			);
 		}
 		if (currentBest[1] === 0) this.finished = true;
+		this.prevBest = currentBest;
 
 		return currentBest[0];
 	};
