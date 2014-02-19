@@ -35,6 +35,7 @@ var ctx;
 var trainingData;
 var handler;
 var pop;
+var humanBasedGenNum;
 
 /******************
  * work functions */
@@ -52,6 +53,8 @@ function initCGPEvoArt() {
 		//grid of randomly generated images (2 input CGPs -> 3 RGB outputs % 256)//
 		pop = [seedBeing];
 		for (var ai = 1; ai < numcellsy*numcellsx; ai++) pop.push(pop[0].mutate());
+		humanBasedGenNum = 0;
+
 		updateCanvas(pop);
 		canvas.addEventListener('mousedown', function(e) {
 			var loc = getMousePos(e);
@@ -104,17 +107,20 @@ function initCGPEvoArt() {
 }
 
 function updateCanvas(generators) {
+	humanBasedGenNum += 1;
+	$('#gen-count').innerHTML = 'Generation #'+humanBasedGenNum+''; 
 	var yunit = Math.floor((canvas.height-(numcellsy-1)*border)/numcellsy); 
 	var xunit = Math.floor((canvas.width-(numcellsx-1)*border)/numcellsx);
 
 	var ai = 0;
-	var asyncLoopYCells = function(callback) { 
+	var asyncLoopYCells = function(callback) {
 		//outer loop work
 		var bi = 0;
 		var asyncLoopXCells = function(callback) {
 			//inner loop work
 			var currImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 			var which = ai*numcellsx + bi;
+			$('#msg').innerHTML = 'Drawing ' + which + '...';
 			paintCGPBeing(
 				generators[which], 
 				ai*(yunit+border), ai*(yunit+border)+yunit, 
@@ -143,7 +149,9 @@ function updateCanvas(generators) {
 				else loop.break();
 			})
 		},
-		function() { /* outer loop finished */ }
+		function() { //outer loop finished
+			$('#msg').innerHTML = 'Finished drawing.'; 
+		}
 	);
 }
 
