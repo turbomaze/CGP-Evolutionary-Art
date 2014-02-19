@@ -10,23 +10,24 @@
 
 /**********
  * config */
-var humanFitness = true;
-var numGens = 10000;
+var humanFitness = false;
+var desiredCanvasWidth = 800;
+
+var numGens = 100000;
 var drawEvery = 50;
 var numTrainingPoints = 50;
 
-var seedBeing = new CGPBeing(4, 5, 4, 3);
-
-var border = 8;
-var numcellsy = 2;
+var border = 12;
 var numcellsx = 3;
+var numcellsy = 2;
+var dim = [80, 80];
+var canvasWidth = numcellsx*dim[0]+border*(numcellsx-1);
+var canvasHeight = numcellsy*dim[1]+border*(numcellsy-1);
 
-var canvasScale = 3;
-var canvasWidth = 271;
-var canvasHeight = 178;
 
 /*************
  * constants */
+var seedBeing = new CGPBeing(4, 8, 6, 3);
 
 /*********************
  * working variables */
@@ -41,14 +42,15 @@ var humanBasedGenNum;
  * work functions */
 function initCGPEvoArt() {
 	canvas = $('#canvas');
-	canvas.width = canvasWidth;
-	canvas.height = canvasHeight;
-	canvas.style.width = (canvas.width*canvasScale)+'px';
-	canvas.style.height = (canvas.height*canvasScale)+'px';
-	ctx = canvas.getContext('2d');
+	ctx = canvas.getContext('2d');	
 	trainingData = [];
 	
 	if (humanFitness) {
+		canvas.width = canvasWidth;
+		canvas.height = canvasHeight;
+		canvas.style.width = desiredCanvasWidth+'px';
+		canvas.style.height = Math.round((desiredCanvasWidth/canvasWidth)*canvasHeight)+'px';
+
 		///////////////////////////////////////////////////////////////////////////
 		//grid of randomly generated images (2 input CGPs -> 3 RGB outputs % 256)//
 		pop = [seedBeing];
@@ -70,16 +72,26 @@ function initCGPEvoArt() {
 	} else {
 		handler = new Handler(1, 6, seedBeing);
 		getPixelsFromImage('image.png', function(data, width, timeTaken) {
-			//load some random points as training data
+			//set the canvas width to accomodate the size of the image
 			var numPixels = data.length/4;
+			var height = numPixels/width;
+			canvas.width = width;
+			canvas.height = height;
+			canvas.style.width = desiredCanvasWidth+'px';
+			canvas.style.height = Math.round(
+				(desiredCanvasWidth/canvas.width)*canvas.height
+			) + 'px';
+		
+			//load some random points as training data
 			for (var ti = 0; ti < numTrainingPoints; ti++) {
-				var x = getRandNum(0, width);
-				var y = getRandNum(0, numPixels/width);
-				var idx = 4*(y*width+x);
-				var r = data[idx];
-				var g = data[idx+1];
-				var b = data[idx+2];
-				trainingData.push([x, y, r, g, b]);
+				var canvasx = getRandNum(0, width);
+				var canvasy = getRandNum(0, height);
+				var x = tightMap(canvasx, 0, width, -0.5, 0.5);
+				var y = tightMap(canvasy, 0, height, -0.5, 0.5);
+				var r = Math.sqrt(x*x + y*y);
+				var theta = Math.atan2(y, x);
+				var idx = 4*(canvasy*width+canvasx); //idx in pixel array
+				trainingData.push([[x, y, r, theta], data.slice(idx, idx+3)]);
 			}
 
 			//evolve
@@ -156,10 +168,41 @@ function updateCanvas(generators) {
 }
 
 function paintCGPBeing(gen, ys, ye, xs, xe) {
-	function getRGBFromRaw(arr) {
-		return arr.map(function(n){return Math.floor(tightMap(n,0,1,0,255));});
-	}
+	//determine the range of the outputting functions
+	var funcRanges = getRangeOutputNodes(gen); //num outputs must be 3
 
+	//draw all the pixels to the screen
+	var currImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+	for (var yi = ys; yi < ye; yi++) {
+		for (var xi = xs; xi < xe; xi++) {
+			var idx = 4*(yi*canvas.width + xi);
+
+			var x = tightMap(xi, xs, xe, -0.5, 0.5);
+			var y = tightMap(yi, ys, ye, -0.5, 0.5);
+			var r = Math.sqrt(x*x + y*y);
+			var theta = Math.atan2(y, x);
+			var res = gen.evaluate([x, y, r, theta]);
+			var color = getColorFromOutput(funcRanges, res); //raw converted to an RGB value
+			currImageData.data[idx+0] = color[0];
+			currImageData.data[idx+1] = color[1];
+			currImageData.data[idx+2] = color[2];
+			currImageData.data[idx+3] = 255;
+		}
+	}
+	ctx.putImageData(currImageData, 0, 0);
+}
+
+/********************
+ * helper functions */
+function getColorFromOutput(funcRanges, output) {
+	var raw = []; //the raw, normalized values of the outputs
+	raw[0] = tightMap(output[0], funcRanges[0][0], funcRanges[0][1], 0, 1);
+	raw[1] = tightMap(output[1], funcRanges[1][0], funcRanges[1][1], 0, 1);
+	raw[2] = tightMap(output[2], funcRanges[2][0], funcRanges[2][1], 0, 1);
+	return getRGBFromRaw(raw); //raw converted to an RGB value
+}
+
+function getRangeOutputNodes(gen) {
 	//determine the range of the outputting functions
 	var funcRanges = []; //the number of outputs must be 3 so this will be 3 long
 	//get the function ids of the final elements
@@ -175,34 +218,9 @@ function paintCGPBeing(gen, ys, ye, xs, xe) {
 			}
 		}
 	}
-
-	//draw all the pixels to the screen
-	var currImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-	for (var yi = ys; yi < ye; yi++) {
-		for (var xi = xs; xi < xe; xi++) {
-			var x = tightMap(xi-xs, 0, xe-xs, -0.5, 0.5);
-			var y = tightMap(yi-ys, 0, ye-ys, -0.5, 0.5);
-			var r = Math.sqrt(x*x + y*y);
-			var theta = Math.atan2(y, x);
-			var res = gen.evaluate([x, y, r, theta]);
-
-			var idx = 4*(yi*canvas.width + xi);
-			var raw = []; //the raw, normalized values of the outputs
-			raw[0] = tightMap(res[0], funcRanges[0][0], funcRanges[0][1], 0, 1);
-			raw[1] = tightMap(res[1], funcRanges[1][0], funcRanges[1][1], 0, 1);
-			raw[2] = tightMap(res[2], funcRanges[2][0], funcRanges[2][1], 0, 1);
-			var color = getRGBFromRaw(raw); //raw converted to an RGB value
-			currImageData.data[idx+0] = color[0];
-			currImageData.data[idx+1] = color[1];
-			currImageData.data[idx+2] = color[2];
-			currImageData.data[idx+3] = 255;
-		}
-	}
-	ctx.putImageData(currImageData, 0, 0);
+	return funcRanges;
 }
 
-/********************
- * helper functions */
 function getPixelsFromImage(location, callback) { //returns array of pixel colors in the image
 	var timeStartedGettingPixels = new Date().getTime();
 	var img = new Image(); //make a new image
@@ -228,7 +246,11 @@ function getPixelsFromImage(location, callback) { //returns array of pixel color
 
 function getMousePos(e) {
 	var rect = canvas.getBoundingClientRect();
-	return [(e.clientX-rect.left)/canvasScale, (e.clientY-rect.top)/canvasScale];
+	console.log(rect)
+	return [
+		(e.clientX-rect.left)/(desiredCanvasWidth/canvasWidth), 
+		(e.clientY-rect.top)/(desiredCanvasWidth/canvasWidth)
+	];
 }
 
 function $(sel) {
@@ -238,6 +260,10 @@ function $(sel) {
 
 function currentTimeMillis() {
 	return new Date().getTime();
+}
+
+function getRGBFromRaw(arr) {
+	return arr.map(function(n){return Math.floor(tightMap(n,0,1,0,255));});
 }
 
 //stolen from http://stackoverflow.com/questions/4288759/asynchronous-for-cycle-in-javascript
@@ -393,12 +419,13 @@ function CGPBeing(numInputs, cols, rows, numOutputs, dna) {
 	this.getFitness = function(toBeat) {
 		toBeat = toBeat || Math.pow(2, 1023);
 		var score = 0;
-		var colorsSeen = [];
+		var funcRanges = getRangeOutputNodes(this); //num outputs must be 3
 		for (var ai = 0; ai < trainingData.length; ai++) {
 			//don't waste time if it's already sub-parent
 			if (score > toBeat) break; //don't bother
 			var guess = this.evaluate(trainingData[ai][0]);
-			score += correspSumSqDiff(guess, trainingData[ai][1]);
+			var color = getColorFromOutput(funcRanges, guess); //raw converted to an RGB value
+			score += correspSumSqDiff(color, trainingData[ai][1]);
 		}
 
 		if (isNaN(score) || Math.abs(score) >= Infinity) {
@@ -523,7 +550,7 @@ function CGPBeing(numInputs, cols, rows, numOutputs, dna) {
 	function correspSumSqDiff(arr1, arr2) {
 		var sum = 0;
 		for (var ai = 0; ai < Math.min(arr1.length, arr2.length); ai++) {
-			sum += Math.pow(2, (arr1.length-1)-ai)*Math.pow(arr1[ai] - arr2[ai], 2);
+			sum += Math.pow(arr1[ai] - arr2[ai], 2);
 		}
 		return sum;
 	}
